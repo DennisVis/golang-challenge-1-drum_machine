@@ -60,19 +60,14 @@ func (p *Pattern) String() string {
 		tBuff.WriteString(sBuff.String())
 	}
 
-	tempo := float64(p.tempo)
-	roundedTempo := float64(int64(tempo / 0.5 + 0.5)) * 0.5
-	tempoString := strconv.Itoa(int(p.tempo))
-	if roundedTempo != tempo {
-		tempoString = strconv.FormatFloat(roundedTempo, 'f', 1, 32)
+	tmpo := float64(p.tempo)
+	rTmpo := float64(int64(tmpo / 0.5 + 0.5)) * 0.5
+	dTmpo := strconv.Itoa(int(p.tempo))
+	if rTmpo != tmpo {
+		dTmpo = strconv.FormatFloat(rTmpo, 'f', 1, 32)
 	}
 
-	return fmt.Sprintf(
-		"Saved with HW Version: %s\nTempo: %s%s\n",
-		p.version,
-		tempoString,
-		tBuff.String(),
-	)
+	return fmt.Sprintf("Saved with HW Version: %s\nTempo: %s%s\n", p.version, dTmpo, tBuff.String())
 }
 
 // decodeTrack uses the given Reader to read and use the bytes that make up a track.
