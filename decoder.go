@@ -15,6 +15,8 @@ const (
 	nrSteps = 16
 )
 
+// track is the representation of a single instrument
+// within a Pattern.
 type track struct {
 	id    uint8
 	name  string
@@ -121,6 +123,8 @@ func DecodeFile(path string) (*Pattern, error) {
 	return &p, nil
 }
 
+// decodeTrack uses the given Reader to read and use the bytes that make up a track.
+// It returns a pointer to the newly created track.
 func decodeTrack(r io.Reader) (*track, error) {
 	t := track{}
 
