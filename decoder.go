@@ -1,149 +1,147 @@
 package drum
 
 import (
-	"io/ioutil"
 	"fmt"
 	"bytes"
 	"strconv"
 	"strings"
+	"encoding/binary"
+	"os"
+	"io"
 )
 
-func decodeSteps(bytes []byte) []bool {
-	steps := make([]bool, len(bytes))
-	for i := range bytes {
-		b := bytes[i]
-		if int(b) > 0 {
-			steps[i] = true
-		} else {
-			steps[i] = false
-		}
-	}
-	return steps
-}
-
-func decodeTrack(bytes []byte) (track, []byte) {
-	nameLengthIndex := 4
-	nameLength := int(bytes[nameLengthIndex])
-	totalLength := 5 + nameLength + 16
-	nameIndex := nameLengthIndex + 1
-
-	id := strconv.Itoa(int(bytes[0]))
-	name := string(bytes[nameIndex:nameIndex + nameLength])
-	steps := decodeSteps(bytes[nameIndex + nameLength:totalLength])
-	track := track{id, name, steps}
-
-	if totalLength > len(bytes) {
-		return track, nil
-	}
-
-	return track, bytes[totalLength:]
-}
-
-func decodeTracks(bytes []byte, tracks []track) []track {
-	track, rest := decodeTrack(bytes)
-	if rest != nil {
-		tracks = append(tracks, track)
-
-		if len(rest) > 0 {
-			return decodeTracks(rest, tracks)
-		}
-	}
-	return tracks
-}
-
-func decodeVersion(bytes []byte) string {
-	versionBytes := make([]byte, 0)
-	startIndex := 14
-	i := 0
-	for {
-		b := bytes[startIndex + i]
-		if int(b) == 0 {
-			break
-		}
-		versionBytes = append(versionBytes, b)
-		i++
-	}
-	return string(versionBytes)
-}
-
-func decodeTempo(bytes []byte, version string) string {
-	tempo := float64(bytes[48])
-
-	if strings.Contains(version, "909") {
-		return "240"
-	} else if strings.Contains(version, "708") {
-		return "999"
-	}
-
-	tempo = tempo / 2.0
-	if tempo < 100.0 {
-		return strconv.FormatFloat(tempo + 0.5, 'f', 1, 64)
-	}
-
-	return strconv.FormatFloat(tempo, 'f', 0, 64)
-}
-
-// DecodeFile decodes the drum machine file found at the provided path
-// and returns a pointer to a parsed pattern which is the entry point to the
-// rest of the data.
-// TODO: implement
-func DecodeFile(path string) (*Pattern, error) {
-	fileBytes, err := ioutil.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-
-	version := decodeVersion(fileBytes)
-	tempo := decodeTempo(fileBytes, version)
-	tracks := decodeTracks(fileBytes[50:], make([]track, 0))
-
-	p := &Pattern{version, tempo, tracks}
-
-	return p, nil
-}
+const (
+	header = "SPLICE"
+	nrSteps = 16
+)
 
 type track struct {
-	id    string
+	id    uint8
 	name  string
-	steps []bool
+	steps [nrSteps]bool
 }
 
 // Pattern is the high level representation of the
 // drum pattern contained in a .splice file.
-// TODO: implement
 type Pattern struct {
 	version string
-	tempo   string
+	tempo   float32
 	tracks  []track
 }
 
 func (p *Pattern) String() string {
-	var tracksBuffer bytes.Buffer
+	var tBuff bytes.Buffer
 	for i := range p.tracks {
-		track := p.tracks[i]
+		t := p.tracks[i]
 
-		tracksBuffer.WriteString("\n(")
-		tracksBuffer.WriteString(track.id)
-		tracksBuffer.WriteString(")")
-		tracksBuffer.WriteString(" ")
-		tracksBuffer.WriteString(track.name)
-		tracksBuffer.WriteString("\t")
+		tBuff.WriteString("\n(")
+		tBuff.WriteString(strconv.Itoa(int(t.id)))
+		tBuff.WriteString(")")
+		tBuff.WriteString(" ")
+		tBuff.WriteString(t.name)
+		tBuff.WriteString("\t")
 
-		var stepsBuffer bytes.Buffer
-		for j := range track.steps {
+		var sBuff bytes.Buffer
+		for j := range t.steps {
 			if j % 4 == 0 {
-				stepsBuffer.WriteString("|")
+				sBuff.WriteString("|")
 			}
-			if track.steps[j] {
-				stepsBuffer.WriteString("x")
+
+			if t.steps[j] {
+				sBuff.WriteString("x")
 			} else {
-				stepsBuffer.WriteString("-")
+				sBuff.WriteString("-")
 			}
 		}
-		stepsBuffer.WriteString("|")
+		sBuff.WriteString("|")
 
-		tracksBuffer.WriteString(stepsBuffer.String())
+		tBuff.WriteString(sBuff.String())
 	}
 
-	return fmt.Sprintf("Saved with HW Version: %s\nTempo: %s%s\n", p.version, p.tempo, tracksBuffer.String())
+	tempo := float64(p.tempo)
+	roundedTempo := float64(int64(tempo / 0.5 + 0.5)) * 0.5
+	tempoString := strconv.Itoa(int(p.tempo))
+	if roundedTempo != tempo {
+		tempoString = strconv.FormatFloat(roundedTempo, 'f', 1, 32)
+	}
+
+	return fmt.Sprintf(
+		"Saved with HW Version: %s\nTempo: %s%s\n",
+		p.version,
+		tempoString,
+		tBuff.String(),
+	)
+}
+
+
+// DecodeFile decodes the drum machine file found at the provided path
+// and returns a pointer to a parsed pattern which is the entry point to the
+// rest of the data.
+func DecodeFile(path string) (*Pattern, error) {
+	r, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("unable to read file for payt %s: %v", path, err)
+	}
+
+	p := Pattern{}
+
+	var hdr [len(header)]byte
+	if err := binary.Read(r, binary.BigEndian, &hdr); err != nil {
+		return nil, fmt.Errorf("unable to decode splice header: %v", err)
+	}
+
+	if header != string(hdr[:]) {
+		return nil, fmt.Errorf("decoded file header does not match %v", header)
+	}
+
+	var patSize int64
+	if err := binary.Read(r, binary.BigEndian, &patSize); err != nil {
+		return nil, fmt.Errorf("unable to decode patSize: %v", err)
+	}
+
+	var version [32]byte
+	if err := binary.Read(r, binary.BigEndian, &version); err != nil {
+		return nil, fmt.Errorf("unable to decode version: %v", err)
+	}
+	p.version = strings.TrimRight(string(version[:]), string(0))
+
+	if err := binary.Read(r, binary.LittleEndian, &p.tempo); err != nil {
+		return nil, fmt.Errorf("unable to decode tempo: %v", err)
+	}
+
+	for {
+		track, err := decodeTrack(r)
+		if (err != nil) {
+			break
+		}
+
+		p.tracks = append(p.tracks, *track)
+	}
+
+	return &p, nil
+}
+
+func decodeTrack(r io.Reader) (*track, error) {
+	t := track{}
+
+	if err := binary.Read(r, binary.LittleEndian, &t.id); err != nil {
+		return nil, fmt.Errorf("unable to decode track id: %v", err)
+	}
+
+	var nameLength int32
+	if err := binary.Read(r, binary.BigEndian, &nameLength); err != nil {
+		return nil, fmt.Errorf("unable to decode track name length: %v", err)
+	}
+
+	name := make([]byte, nameLength)
+	if err := binary.Read(r, binary.BigEndian, &name); err != nil {
+		return nil, fmt.Errorf("unable to decode track name: %v", err)
+	}
+	t.name = string(name[:])
+
+	if err := binary.Read(r, binary.LittleEndian, &t.steps); err != nil {
+		return nil, fmt.Errorf("unable to decode track pattern: %v", err)
+	}
+
+	return &t, nil
 }
