@@ -31,6 +31,14 @@ type Pattern struct {
 	tracks  []track
 }
 
+/*
+String returns a Pattern in string format.
+The string will be formatted as follows.
+
+Saved with HW Version: {the Pattern version}
+Tempo: {the Pattern tempo}
+({a track id}) {a track name}	{a track's steps, for instance: |x---|x---|x---|x---|}
+ */
 func (p *Pattern) String() string {
 	var tBuff bytes.Buffer
 	for i := range p.tracks {
@@ -70,33 +78,6 @@ func (p *Pattern) String() string {
 	return fmt.Sprintf("Saved with HW Version: %s\nTempo: %s%s\n", p.version, dTmpo, tBuff.String())
 }
 
-// decodeTrack uses the given Reader to read and use the bytes that make up a track.
-// It returns a pointer to the newly created track.
-func decodeTrack(r io.Reader) (*track, error) {
-	t := track{}
-
-	if err := binary.Read(r, binary.LittleEndian, &t.id); err != nil {
-		return nil, fmt.Errorf("unable to decode track id: %v", err)
-	}
-
-	var nameLength int32
-	if err := binary.Read(r, binary.BigEndian, &nameLength); err != nil {
-		return nil, fmt.Errorf("unable to decode track name length: %v", err)
-	}
-
-	name := make([]byte, nameLength)
-	if err := binary.Read(r, binary.BigEndian, &name); err != nil {
-		return nil, fmt.Errorf("unable to decode track name: %v", err)
-	}
-	t.name = string(name[:])
-
-	if err := binary.Read(r, binary.LittleEndian, &t.steps); err != nil {
-		return nil, fmt.Errorf("unable to decode track pattern: %v", err)
-	}
-
-	return &t, nil
-}
-
 // DecodeFile decodes the drum machine file found at the provided path
 // and returns a pointer to a parsed pattern which is the entry point to the
 // rest of the data.
@@ -106,7 +87,7 @@ func DecodeFile(path string) (*Pattern, error) {
 		return nil, fmt.Errorf("unable to read file for payt %s: %v", path, err)
 	}
 
-	p := Pattern{}
+	var p Pattern
 
 	var hdr [len(header)]byte
 	if err := binary.Read(r, binary.BigEndian, &hdr); err != nil {
@@ -134,7 +115,7 @@ func DecodeFile(path string) (*Pattern, error) {
 
 	for {
 		track, err := decodeTrack(r)
-		if (err != nil) {
+		if err != nil {
 			break
 		}
 
@@ -142,4 +123,31 @@ func DecodeFile(path string) (*Pattern, error) {
 	}
 
 	return &p, nil
+}
+
+// decodeTrack uses the given Reader to read and use the bytes that make up a track.
+// It returns a pointer to the newly created track.
+func decodeTrack(r io.Reader) (*track, error) {
+	var t track
+
+	if err := binary.Read(r, binary.LittleEndian, &t.id); err != nil {
+		return nil, fmt.Errorf("unable to decode track id: %v", err)
+	}
+
+	var nameLength int32
+	if err := binary.Read(r, binary.BigEndian, &nameLength); err != nil {
+		return nil, fmt.Errorf("unable to decode track name length: %v", err)
+	}
+
+	name := make([]byte, nameLength)
+	if err := binary.Read(r, binary.BigEndian, &name); err != nil {
+		return nil, fmt.Errorf("unable to decode track name: %v", err)
+	}
+	t.name = string(name[:])
+
+	if err := binary.Read(r, binary.LittleEndian, &t.steps); err != nil {
+		return nil, fmt.Errorf("unable to decode track pattern: %v", err)
+	}
+
+	return &t, nil
 }
